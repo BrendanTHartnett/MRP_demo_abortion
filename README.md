@@ -4,6 +4,8 @@
 
 **MrP_demo_markdown.rmd** is the replication markdown for the above tutorial. 
 
+The national survey data used is from the 2022 Cooperative Election Study, which can be downloaded here: https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi%3A10.7910/DVN/PR4L8P.
+
 **tidycensus_get_census_data.R** uses Tidycensus to scrape and organize state-level census data. The results of this code (used in the tutorial) can be installed without scraping via **state_census_data.csv.**
 
 **fipstostates.csv** converts state FIPS codes (as used in both the CES and Census) to an index of 1-50 for all states. This drops D.C., but allows us to use a loop to get state-level random effect.
