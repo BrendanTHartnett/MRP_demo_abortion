@@ -12,4 +12,4 @@ The national survey data used is from the 2022 Cooperative Election Study, which
 
 **fipstostates.csv** converts state FIPS codes (as used in both the CES and Census) to an index of 1-50 for all states. This drops D.C., but allows us to use a loop to get state-level random effect.
 
-**Create_map** uses leaflet to plot the state-level estimates obtained in the tutorial. 
+**Create_map.R** uses leaflet to plot the state-level estimates obtained in the tutorial. 
