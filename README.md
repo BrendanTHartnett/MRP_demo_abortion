@@ -2,7 +2,7 @@
 
 This is the repository for a tutorial using the 2022 CES to predict state-level support for allowing abortion in all circumstances as a matter of choice.
 
-**MRP_demo_TPOL.pdf** is an annotated demonstration of using mulitlevel regression with post-stratification and the 2022 Cooperative Elections Study to predict state-level support for allowing abortion in all circumstances as a matter of choice.
+**Using Multilevel Regression with Post-Stratification to Estimate State-Level Public Opinion.pdf** is an annotated demonstration of using mulitlevel regression with post-stratification and the 2022 Cooperative Elections Study to predict state-level support for allowing abortion in all circumstances as a matter of choice.
 
 **MrP_demo_markdown.rmd** is the replication markdown for the above tutorial. 
 
