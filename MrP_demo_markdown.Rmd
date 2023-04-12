@@ -1,0 +1,308 @@
+---
+title: "Using Multilevel Regression with Post-Stratification to Estimate State-Level Public Opinion"
+output: html_document
+date: '2023-04-12'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+In the fall, Brian Schaffner and I shared [state-level estimates](https://www.washingtonpost.com/politics/2022/10/12/republicans-election-deniers-voters-midterms/) of belief in Trump's Big Lie in *The Washington Post*. Given pollsters did not systematically survey each state to probe its voting age population's belief in the integrity of the 2020 Presidential Election, we were forced to make estimates of state-level opinion using a multilevel modeling method known as [multilevel regression with post-stratification]("https://academic.oup.com/aje/article/187/8/1780/4964985") (MrP). 
+
+MrP is commonly used by social-science to [estimate subnational public opinion from national surveys]("http://www.columbia.edu/~jhp2121/publications/HowShouldWeEstimateOpinion.pdf") — on issues such as support for [free speech](https://www.washingtonpost.com/news/monkey-cage/wp/2018/02/13/does-free-speech-help-democracy-we-did-the-research/) the [marriage equality](https://www.washingtonpost.com/politics/2022/08/16/congress-republicans-respect-marriage-act/). YouGov even uses MrP to [forecast](https://www.wired.co.uk/article/yougov-general-election-poll-mrp) the partisan vote of parliamentary districts in the UK!
+
+To demonstrate how to use MrP to estimate subnational public opinion, I will use the 2022 Cooperative Election Study — a national survey of nearly 60,000 adults — to estimate state-level support for keeping abortion legal in all circumstances as a matter of choice. The CES can be downloaded from the Harvard Dataverse at [this link](https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/PR4L8P). The survey is large, but MrP can be used with smaller-N surveys — and even to produce estimates of opinion in less populated geographic units, such as state house districts.  
+
+```{r, include=FALSE}
+library(readr)
+```
+
+```{r, echo=T, results='hide', warning=FALSE, message=FALSE}
+dat <- read_csv("CES22_Common.csv")
+```
+Within the CES, I will look at **CC22_332a** which asks if respondents support or oppose always allowing a woman to obtain an abortion as a matter of choice. Responses are coded as 1 = "support" and 2 = "oppose" which I will recode to a binary of [0,1] wherein 1 = support. This will allow us to estimate the percentage of state populations who suppot always allowing abortion as a matter of choice. 
+
+```{r, warning=FALSE}
+dat$prochoice[dat$CC22_332a==1] <- 1 #support
+dat$prochoice[dat$CC22_332a==2] <- 0 #oppose
+```
+
+Next, we need to prepare the demographics data which I will use in the multilevel model to arrive at state-level estimates of public opinion. My model will control for education (**educ**), race (**race**, **hispanic**), income (**faminc_new**) and age (obtained via **birthyr**). However, these variables need to be recoded into binary, given the Census data we use to weight make our prediction are in proportions of the target population — in this case, states.
+
+First, we will recode my education variable to a binary for if a respondent has *not* pursued more than a high school degree. This is due to the education polarization surrounding both [unplanned pregnancies](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3578704/) and the two American [political parties](https://nymag.com/intelligencer/2022/10/education-polarization-diploma-divide-democratic-party-working-class.html). As such, we will recode **educ** to a new variable **hsmax** in which if a responded has pursued a higher degree, they are coded as 0, and respondents who have only received at most a high school diploma, who are coded as 1. 
+
+```{r}
+dat$hsmax <- 0 
+dat$hsmax[dat$educ < 3] <- 1 #For those with high school degree or less
+```
+
+Next, we should recode race into two different binary variables: one for if a respondent identifies as Black (**black**), and another for if a respondent is Hispanic (**hispanx**). 
+
+```{r}
+dat$black <- 0
+dat$black[dat$race==2] <- 1 #where 2 is "Black or African-American"
+
+dat$hispanx <- 0
+dat$hispanx[dat$race==3] <- 1 #for those who said their race is "Hispanic of Latino"
+dat$hispanx[dat$hispanic==1] <- 1 #for those who said they are Spanish, latino or Hispanic
+```
+
+I then recode age into a binary variable for if a respondent is over the age of 45 (**over45**). In early 2023, this dummy variable will be true for respondents born before 1977, as indicated in **birthyr**.
+
+```{r}
+dat$over45 <- 0
+dat$over45[dat$birthyr < 1977] <- 1
+```
+
+
+I will also recode income to a binary for those whose household incomes are over $100,000 (**over100k**).
+
+```{r}
+dat$over100k <- 0
+dat$over100k[dat$faminc_new > 10 & dat$faminc_new != 97] <- 1 
+```
+
+Ultimately, and perhaps surprising given the focus of this analysis, we do not need to control for gender, given the limited variation in gender composition of states. However, I will include a dummy variable for if respondents voted for former-President Donald Trump in the 2020 election (**trump**). 
+
+```{r}
+dat$trump <- 0
+dat$trump[dat$presvote16post==2] <- 1
+```
+
+Now, we can run a regression model to estimate the effect of causal these demographic variables have on support for keeping abortion legal in circumstances as a matter of personal choice. To do this, we can use a logistic regression. 
+
+```{r}
+Model <- lm(prochoice ~ hsmax + black + hispanx + over100k + trump + over45, data=dat)
+summary(Model)
+```
+
+However, as our intention is to estimate public opinion in the states by constructing this multilevel model with state-level estimates, we need to use an inverse logit model. In this model, we will also have to employ state random effects. To do this, we need to load the **lme4** package. 
+
+However, before we can run this model, we first need to convert the respondent's state (**inputstate**) which is their state's FIPS code, to an index for the state in alphabetical order. To do this easily, I created a [dataframe, found here](https://github.com/BrendanTHartnett/MRP_demo_abortion/blob/main/fipstostates.csv) on my [GitHub](https://github.com/BrendanTHartnett?tab=repositories) repository for this [tutorial](https://github.com/BrendanTHartnett/MRP_demo_abortion) which can be used inported to convert states identified by FIPS codes to an index between 1-50 corresponding to each state's alphabetical order, so that we can employ a simple loop when controling for state-level random effects.
+
+```{r, results='hide', warning=FALSE, message=FALSE}
+library(lme4)
+statesfips <- read_csv("https://raw.githubusercontent.com/BrendanTHartnett/MRP_demo_abortion/main/fipstostates.csv")
+dat <- merge(dat, statesfips, by.x="inputstate", by.y="fips")
+```
+
+This does remove Washington, D.C., which, given to its overwhelmingly liberal voting record, is fine. We can now run a generalized linear mixed-effects model.
+
+```{r}
+state_model <- glmer(formula = prochoice ~  (1 | STATE) + hsmax + black + hispanx + over100k + trump + over45, data=dat, family=binomial(link="logit"))
+summary(state_model)
+```
+
+Once we obtain state-level population data for these fixed-effects, we can fit our model to each state's demographic composition. 
+
+## Obtaining state-level population data
+
+We  can use the **tidycensus** package to import state-level population metrics used to predict state-level opinion. My lab mate Julian Perry recently published a great tidycensus tutorial (cite) which I encourage those of you unfamiliar with **tidycensus** to consult. 
+
+Using **tidycensus** I will import state-level Census estimates of education, race, income, age and labor force participation rates. The code for this can be found here, but we will just work with the resulting Census data, the file with the resulting Census data can be imported from my GitHub.
+
+```{r, echo=T, results='hide', warning=FALSE, message=FALSE}
+Census <- read_csv("https://raw.githubusercontent.com/BrendanTHartnett/MRP_demo_abortion/main/state_census_data.csv")
+head(Census)
+```
+
+```{r}
+head(Census)
+```
+
+Obviously, the Census does not ask about one's voting history nor their political leanings. Therefore, in order to discern the percentage of each state's voting age population that voted for Trump in 2020 or did not vote, we will need to use data from the [MIT Election Lab](https://electionlab.mit.edu) to  get state-level election returns from the 2020 Presidential Election. To do this, we will access presidential election results from the Harvard Dataverse using the **dataverse** package. 
+
+```{r cars, echo=T, results='hide', message=FALSE, warning=FALSE}
+library(tidyverse)
+library(dataverse)
+Sys.setenv("DATAVERSE_SERVER" = "dataverse.harvard.edu")
+
+#Call the specific file of the dataset
+election_dat.tab <- get_dataframe_by_name(
+  filename = "1976-2020-president.tab",
+  dataset = "10.7910/DVN/42MVDX",
+  server = "dataverse.harvard.edu")
+```
+
+I then just wrangle the results into Trump's votes count as a percentage of all votes in each state. 
+
+```{r}
+results2020 <- subset(election_dat.tab, year==2020)
+trump.results <- subset(results2020, candidate=="TRUMP, DONALD J.")
+
+trump.results$trumpN <- trump.results$candidatevotes
+trump.results$trumpP <- trump.results$trumpN/trump.results$totalvotes
+trump.results$NAME <- str_to_title(trump.results$state)
+
+election_data <- trump.results[, c("NAME", "trumpN", "trumpP", "totalvotes")]
+```
+
+Finally, we can merge this data with my national survey results. 
+
+```{r}
+Census1 = merge(Census, election_data, by="NAME")
+Census$STATE <- Census$NAME
+Census <- Census1
+```
+
+
+## Using MrP
+
+Now, we can estimate state-level public opinion, using MrP. To begin, we need to create an array to contain state random effects. 
+
+```{r}
+state_ranefs <- array(NA, c(50, 1))
+```
+
+Next, we need to assign state random effects to each respondent using the model obtained from the CES. To do this, we will run a loop through each state. 
+
+```{r}
+# assign state random effects to array while preserving NAs
+for (i in Census$STATE) {
+  
+  state_ranefs[i, ] <- ranef(state_model)$STATE[i, 1]
+  
+}
+state_ranefs[, 1][is.na(state_ranefs[, 1])] <- 0
+```
+
+We can then use the invert logit function to model state-level predictions of support for keeping abortion legal in all circumstances with random effects for states and fixed effects from their demographics. We will need to do this using the **arm** package.
+
+```{r, message=FALSE, warning=FALSE}
+library(arm)
+Census$prediction <- invlogit(fixef(state_model)['(Intercept)'] +
+                              state_ranefs[Census$STATE, 1] +
+                              (fixef(state_model)['hsmax'] * Census$highschool_only) +
+                              (fixef(state_model)['black'] * Census$black) +
+                              (fixef(state_model)['hispanx'] * Census$hispanic) +
+                              (fixef(state_model)['over100k'] * Census$over100k) +
+                              (fixef(state_model)['over45'] * Census$over45) +
+                              (fixef(state_model)['trump'] * Census$trumpP))
+
+summary(Census$prediction)
+```
+
+And there you have it! Now we have estimated support for abortion among voting age adults in each state.
+
+```{r, include=FALSE}
+library(albersusa)
+library(sf)
+library(ggplot2)
+library(sf)
+library(albersusa)
+library(ggrepel)
+Census$prediction
+Census$predictionP = Census$prediction*100
+Census$PredictionP = round(Census$prediction, digits = 2)
+
+
+usa_sf <-
+  st_as_sf(usa_composite("laea")) %>%
+  mutate(
+    CENTROID = map(geometry, st_centroid),
+    COORDS = map(CENTROID, st_coordinates),
+    COORDS_X = map_dbl(COORDS, 1),
+    COORDS_Y = map_dbl(COORDS, 2)
+  ) %>%
+  as_tibble() %>%
+  st_as_sf()
+
+usa_sf$nudge_x <- 0
+usa_sf$nudge_y <- 0
+
+
+
+x_range <- abs(Reduce("-", range(usa_sf$COORDS_X)))
+y_range <- abs(Reduce("-", range(usa_sf$COORDS_Y)))
+
+ix <- usa_sf$name %in% c("New Hampshire", "Vermont", "Massachusetts")
+usa_sf$nudge_x[ix] <- -1 * 0.15 * x_range
+usa_sf$nudge_y[ix] <- 1 * 0.15 * y_range
+
+ix <- usa_sf$name %in% c(
+  "Massachusetts",
+  "Rhode Island", "Connecticut", "New Jersey",
+  "Maryland", "Delaware", "New Hampshire"
+)
+usa_sf$nudge_x[ix] <- 1 * 0.2 * x_range
+usa_sf$nudge_y[ix] <- -1 * 0.15 * y_range
+head(usa_sf)
+
+
+
+
+usa_sf2 <- subset(usa_sf, name != "District of Columbia")
+
+usa_sf2$fips_state
+usa_sf2$fips <- as.numeric(usa_sf2$fips_state)
+Census$GEOID
+data_to_map <- merge(usa_sf2, Census, by.x="fips", by.y="GEOID")
+
+data_to_map$predictionP <- round(data_to_map$predictionP, digits = 0)
+
+
+data_to_map$predicted_value <- as.character(data_to_map$predictionP)
+data_to_map$predicted_value
+data_to_map$predicted_value <- paste(data_to_map$predicted_value, "%", sep="")
+
+data_to_map$predicted_value[data_to_map$name=="Massachusetts"] <- "67%"
+data_to_map$predicted_value[data_to_map$name=="Connecticut"] <- "65%"
+data_to_map$predicted_value[data_to_map$name=="New Jersey"] <- "62%"
+data_to_map$predicted_value[data_to_map$name=="Maryland"] <- "63%"
+data_to_map$predicted_value[data_to_map$name=="Delaware"] <- "60%"
+data_to_map$predicted_value[data_to_map$name=="New Hampshire"] <- "56%"
+data_to_map$predicted_value[data_to_map$name=="Rhode Island"] <- "62%"
+data_to_map$predicted_value[data_to_map$name=="Hawaii"] <- "57%"
+data_to_map$predicted_value[data_to_map$name=="Vermont"] <- "68%"
+
+
+
+data_to_map$predicted_value
+data_to_map$nudge_x[data_to_map$name=="Michigan"] <- 45000
+data_to_map$nudge_y[data_to_map$name=="Michigan"] <- 45000*(-1)
+data_to_map$name
+
+data_to_map$nudge_y[data_to_map$name=="Louisiana"] <- 45000*(-1)
+data_to_map$nudge_x[data_to_map$name=="Florida"] <- 90000
+
+data_to_map$nudge_x[data_to_map$name=="Hawaii"] <- 200000*(-1)
+data_to_map$nudge_y[data_to_map$name=="Hawaii"] <- 200000*(-1)
+
+table(data_to_map$prediction)
+data_to_map$prediction_percent <- 100*data_to_map$prediction
+class(data_to_map$COORDS_X)
+data_to_map$predicted_value
+plot <- ggplot(data = data_to_map) +
+  geom_sf(aes(fill = prediction_percent)) +
+  geom_text_repel(
+    mapping = aes(
+      x = COORDS_X,
+      y = COORDS_Y,
+      label = predicted_value
+    ),
+    nudge_x = data_to_map$nudge_x,
+    nudge_y = data_to_map$nudge_y,
+    size = 3,
+    min.segment.length = 1,
+    point.size = NA,
+    segment.color = "grey50"
+  ) +
+  coord_sf(crs = st_crs(data_to_map), datum = NA) +
+  theme_void() +
+  xlim(min(usa_sf$COORDS_X) * 1.12, max(usa_sf$COORDS_X) * 1.11) + 
+  ylim(min(usa_sf$COORDS_Y) * 1.1, max(usa_sf$COORDS_Y) * 1.2) + 
+  labs(title = "     Predicted percentage of eligible voters who support allowing abortion
+       in all circumstances as a matter of choice", caption = "Figure by Brendan Hartnett.
+       Values predicted derive from multilevel regression and post-stratification model.
+       Survey data: CES 2022.
+       
+       ") +  
+  scale_fill_continuous(limits = c(20,75), breaks = c(30, 50, 70), labels = c("30%", "50%", "70%"), low = "white", high = "darkorchid", name = " ") + theme(legend.position = "right")
+```
+
+```{r pressure, echo=FALSE}
+plot
+```
+
+You can find the code that is used to make the above visualization [here](https://github.com/BrendanTHartnett/MRP_demo_abortion/blob/main/create_map.R). 
