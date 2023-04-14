@@ -2,9 +2,7 @@
 
 This is the repository for a tutorial using the 2022 CES to predict state-level support for allowing abortion in all circumstances as a matter of choice.
 
-**Using Multilevel Regression with Post-Stratification to Estimate State-Level Public Opinion.pdf** is an annotated demonstration of using mulitlevel regression with post-stratification and the 2022 Cooperative Elections Study to predict state-level support for allowing abortion in all circumstances as a matter of choice.
-
-**MrP_demo_markdown.rmd** is the replication markdown for the above tutorial. 
+**Estimating state-level public opinion using multilevel regression with post-stratification in R** is an annotated demonstration of using mulitlevel regression with post-stratification and the 2022 Cooperative Elections Study to predict state-level support for allowing abortion in all circumstances as a matter of choice.
 
 The national survey data used is from the 2022 Cooperative Election Study, which can be downloaded here: https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi%3A10.7910/DVN/PR4L8P.
 
